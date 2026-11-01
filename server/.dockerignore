@@ -1,0 +1,12 @@
+node_modules
+downloads
+logs
+.env
+.keep-alive.pid
+.public-url
+bin/cloudflared.exe
+bin/ffmpeg.exe
+bin/ffprobe.exe
+bin/ffplay.exe
+bin/yt-dlp.exe
+
