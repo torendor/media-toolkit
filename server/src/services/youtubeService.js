@@ -29,6 +29,8 @@ async function getInfo(url) {
   return new Promise((resolve, reject) => {
     const args = [
       '--dump-json',
+      '--extractor-args',
+      'youtube:player_client=ios,android,web',
       '--no-warnings',
       '--no-playlist',
       '--skip-download',
@@ -153,6 +155,8 @@ async function download(url, options = {}, progressCallback = null) {
     path.join(DOWNLOAD_DIR, '%(title)s.%(ext)s');
 
   const args = buildFormatArgs(options);
+  // Bypass YouTube datacenter bot detection by impersonating mobile clients
+  args.push('--extractor-args', 'youtube:player_client=ios,android,web');
   if (LOCAL_BIN && fs.existsSync(path.join(LOCAL_BIN, 'ffmpeg.exe'))) {
     args.push('--ffmpeg-location', LOCAL_BIN);
   } else {

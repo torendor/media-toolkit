@@ -42,7 +42,7 @@ import { useBackendStatus } from './hooks/useBackendStatus';
 import { analyzeUrl } from './utils/api';
 
 export default function App() {
-  const [showSplash, setShowSplash] = useState(false);
+  const [showSplash, setShowSplash] = useState(true);
   const [currentUrl, setCurrentUrl] = useState('');
   const [platform, setPlatform] = useState(null);
   const [mediaInfo, setMediaInfo] = useState(null);
