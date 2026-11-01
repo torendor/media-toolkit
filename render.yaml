@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: media-toolkit-server
+    env: docker
+    rootDir: server
+    dockerfilePath: Dockerfile
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: PORT
+        value: 3001
+      - key: NODE_ENV
+        value: production
+      - key: YOUTUBE_COOKIES_BASE64
+        sync: false

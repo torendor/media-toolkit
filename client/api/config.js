@@ -1,13 +1,17 @@
 /**
  * GET /api/config
- * Exposes the public URL of the download server (set by `start-public.bat`).
+ * Exposes the active backend URLs with smart failover:
+ *  - localTunnelUrl: User's PC tunnel (fastest, clean residential IP)
+ *  - cloudBackendUrl: 24/7 Cloud server (Render/Railway) for when PC is off
  */
 export default function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
-  const raw = (process.env.BACKEND_URL || process.env.VITE_API_URL || '').trim();
-  const cleaned = raw.replace(/^["']+|["']+$/g, '').replace(/\/+$/, '') || null;
+  const localTunnel = (process.env.BACKEND_URL || '').replace(/^["']+|["']+$/g, '').replace(/\/+$/, '') || null;
+  const cloudBackend = (process.env.CLOUD_BACKEND_URL || 'https://media-toolkit-server.onrender.com').replace(/^["']+|["']+$/g, '').replace(/\/+$/, '');
+
   res.status(200).json({
-    backendUrl: cleaned,
+    backendUrl: localTunnel || cloudBackend,
+    localTunnelUrl: localTunnel,
+    cloudBackendUrl: cloudBackend,
   });
 }
-

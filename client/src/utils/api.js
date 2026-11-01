@@ -42,12 +42,13 @@ export function setApiOverride(url) {
 }
 
 /**
- * Resolve the download server base URL.
- * Priority: manual override → localhost (dev) → /api/config (Vercel env) → VITE_API_URL.
+ * Resolve the download server base URL with Smart Dual-Failover:
+ * 1. Checks manual override or localhost in dev.
+ * 2. Checks local tunnel (user's PC) — if online and responsive, uses it for top speed.
+ * 3. If user's PC is turned OFF or unreachable, seamlessly switches to 24/7 Cloud Backend (Render).
  */
 export async function resolveBackend(force = false) {
   if (currentBase && !force) return currentBase;
-  // Share an in-flight resolution (even when forced) to avoid duplicate /api/config calls.
   if (resolving) return resolving;
 
   const pending = (async () => {
@@ -58,12 +59,38 @@ export async function resolveBackend(force = false) {
     try {
       const res = await fetch('/api/config', { cache: 'no-store' });
       if (res.ok) {
-        const { backendUrl } = await res.json();
-        if (backendUrl) return clean(backendUrl);
+        const configData = await res.json();
+        const localTunnel = clean(configData.localTunnelUrl || configData.backendUrl);
+        const cloudBackend = clean(configData.cloudBackendUrl || 'https://media-toolkit-server.onrender.com');
+
+        // Ping local tunnel with short timeout to check if user's PC is on
+        if (localTunnel && localTunnel !== cloudBackend) {
+          try {
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), 2500);
+            const ping = await fetch(`${localTunnel}/api/health`, {
+              signal: ctrl.signal,
+              cache: 'no-store',
+            });
+            clearTimeout(timer);
+            if (ping.ok) {
+              return localTunnel;
+            }
+          } catch {
+            // User's PC is closed or tunnel expired; fall through to 24/7 cloud server!
+          }
+        }
+
+        // Failover: 24/7 Cloud Backend
+        if (cloudBackend) {
+          return cloudBackend;
+        }
+
+        if (localTunnel) return localTunnel;
       }
     } catch {}
 
-    return clean(import.meta.env.VITE_API_URL) || null;
+    return clean(import.meta.env.VITE_API_URL) || 'https://media-toolkit-server.onrender.com';
   })();
 
   resolving = pending;

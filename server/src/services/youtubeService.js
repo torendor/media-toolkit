@@ -17,6 +17,37 @@ const { getYtdlpPath, getFfmpegPath, LOCAL_BIN } = require('../utils/binaries');
 const DOWNLOAD_DIR = path.resolve(process.env.DOWNLOAD_DIR || './downloads');
 
 /**
+ * Resolve cookie authentication arguments if cookies.txt or YOUTUBE_COOKIES env var exists.
+ * @returns {string[]}
+ */
+function getAuthArgs() {
+  const authArgs = [];
+  const localCookie = path.resolve(__dirname, '../../cookies.txt');
+  if (fs.existsSync(localCookie)) {
+    authArgs.push('--cookies', localCookie);
+    return authArgs;
+  }
+
+  const cookiesBase64 = process.env.YOUTUBE_COOKIES_BASE64;
+  const cookiesRaw = process.env.YOUTUBE_COOKIES;
+
+  if (cookiesBase64 || cookiesRaw) {
+    const cookieFile = path.join(DOWNLOAD_DIR, '.yt_cookies.txt');
+    try {
+      if (!fs.existsSync(cookieFile)) {
+        const content = cookiesBase64 ? Buffer.from(cookiesBase64, 'base64').toString('utf8') : cookiesRaw;
+        fs.writeFileSync(cookieFile, content, 'utf8');
+      }
+      authArgs.push('--cookies', cookieFile);
+    } catch (err) {
+      console.warn('[YouTube Auth] Could not write cookies file:', err.message);
+    }
+  }
+
+  return authArgs;
+}
+
+/**
  * Extract video metadata from a YouTube URL using yt-dlp --dump-json.
  * Returns structured metadata including title, thumbnail, duration, channel,
  * available formats, and whether the URL is a playlist.
@@ -32,6 +63,7 @@ async function getInfo(url, platformOverride = null) {
       '--no-warnings',
       '--no-playlist',
       '--skip-download',
+      ...getAuthArgs(),
     ];
 
     if (!platformOverride || platformOverride === 'youtube') {
@@ -84,6 +116,7 @@ async function getPlaylistInfo(url) {
       '--dump-json',
       '--flat-playlist',
       '--no-warnings',
+      ...getAuthArgs(),
       url,
     ];
 
@@ -158,6 +191,7 @@ async function download(url, options = {}, progressCallback = null) {
     path.join(DOWNLOAD_DIR, '%(title)s.%(ext)s');
 
   const args = buildFormatArgs(options);
+  args.push(...getAuthArgs());
   // Multi-tier client strategy: TV Samsung, VisionOS, Web Creator
   // Solves YouTube bot verification & SABR throttling via JS runtime (node/deno)
   args.push('--extractor-args', 'youtube:player_client=tv_samsung,visionos,web_creator');
