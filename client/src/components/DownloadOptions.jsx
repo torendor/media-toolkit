@@ -124,7 +124,7 @@ export default function DownloadOptions({ platform, onDownload, isDownloading })
   const [audioFormat, setAudioFormat] = useState('mp3');
   const [bitrate, setBitrate] = useState('320');
 
-  const [embedThumbnail, setEmbedThumbnail] = useState(true);
+  const [embedThumbnail, setEmbedThumbnail] = useState(false);
   const [normalize, setNormalize] = useState(false);
   const [trimSilence, setTrimSilence] = useState(false);
 
