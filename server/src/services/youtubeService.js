@@ -156,8 +156,9 @@ async function download(url, options = {}, progressCallback = null) {
 
   const args = buildFormatArgs(options);
   // Multi-tier client strategy: TV Samsung, VisionOS, Web Creator
-  // Completely immune to YouTube datacenter bot blocks and SABR throttling
+  // Solves YouTube bot verification & SABR throttling via JS runtime (node/deno)
   args.push('--extractor-args', 'youtube:player_client=tv_samsung,visionos,web_creator');
+  args.push('--js-runtime', 'node');
   args.push('--concurrent-fragments', '4');
   if (LOCAL_BIN && fs.existsSync(path.join(LOCAL_BIN, 'ffmpeg.exe'))) {
     args.push('--ffmpeg-location', LOCAL_BIN);
