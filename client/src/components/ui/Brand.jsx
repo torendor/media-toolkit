@@ -64,10 +64,54 @@ export function SpotifyIcon({ className }) {
   );
 }
 
+export function InstagramIcon({ className }) {
+  return (
+    <svg viewBox="0 0 24 24" className={clsx('h-4 w-4', className)} aria-hidden="true" fill="none">
+      <defs>
+        <radialGradient id="ig-g" cx="30%" cy="107%" r="150%">
+          <stop offset="0%" stopColor="#fdf497" />
+          <stop offset="5%" stopColor="#fdf497" />
+          <stop offset="45%" stopColor="#fd5949" />
+          <stop offset="60%" stopColor="#d6249f" />
+          <stop offset="90%" stopColor="#285AEB" />
+        </radialGradient>
+      </defs>
+      <rect x="2" y="2" width="20" height="20" rx="6" fill="url(#ig-g)" />
+      <circle cx="12" cy="12" r="4.5" stroke="#fff" strokeWidth="1.8" />
+      <circle cx="17.5" cy="6.5" r="1.2" fill="#fff" />
+    </svg>
+  );
+}
+
+export function TikTokIcon({ className }) {
+  return (
+    <svg viewBox="0 0 24 24" className={clsx('h-4 w-4', className)} aria-hidden="true" fill="currentColor">
+      <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64c.29 0 .58.04.86.12V9.4a6.33 6.33 0 0 0-.86-.06A6.34 6.34 0 0 0 3.1 15.68a6.34 6.34 0 0 0 10.82 4.48c1.77-1.77 2.22-4.27 2.22-6.68V8.14a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1.32-.27z" />
+    </svg>
+  );
+}
+
+export function TwitterIcon({ className }) {
+  return (
+    <svg viewBox="0 0 24 24" className={clsx('h-4 w-4', className)} aria-hidden="true" fill="currentColor">
+      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+    </svg>
+  );
+}
+
 export function PlatformIcon({ platform, className }) {
   if (platform === 'spotify') return <SpotifyIcon className={className} />;
   if (platform === 'youtube') return <YouTubeIcon className={className} />;
+  if (platform === 'instagram') return <InstagramIcon className={className} />;
+  if (platform === 'tiktok') return <TikTokIcon className={className} />;
+  if (platform === 'twitter') return <TwitterIcon className={className} />;
   return null;
 }
 
-export const PLATFORM_LABEL = { youtube: 'YouTube', spotify: 'Spotify' };
+export const PLATFORM_LABEL = {
+  youtube: 'YouTube',
+  spotify: 'Spotify',
+  instagram: 'Instagram',
+  tiktok: 'TikTok',
+  twitter: 'Twitter / X',
+};

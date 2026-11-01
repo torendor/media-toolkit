@@ -16,6 +16,7 @@ const rateLimit = require('express-rate-limit');
 const analyzeRouter = require('./routes/analyze');
 const downloadRouter = require('./routes/download');
 const settingsRouter = require('./routes/settings');
+const searchRouter = require('./routes/search');
 const { cleanupOldFiles } = require('./utils/cleanup');
 const downloadManager = require('./services/downloadManager');
 const { LOCAL_BIN } = require('./utils/binaries');
@@ -81,6 +82,7 @@ app.use('/api/analyze', analyzeRouter);
 app.use('/api/download', downloadRouter);
 app.use('/api/settings', settingsRouter);
 app.use('/api/trending', require('./routes/trending'));
+app.use('/api/search', searchRouter);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

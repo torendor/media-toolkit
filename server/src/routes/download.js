@@ -431,7 +431,7 @@ async function processDownload(downloadId, url, platform, options) {
 
   let outputPath;
 
-  if (platform === 'youtube') {
+  if (['youtube', 'tiktok', 'instagram', 'twitter'].includes(platform)) {
     outputPath = await youtubeService.download(url, options, progressCallback);
 
     // Apply post-processing if requested
@@ -511,7 +511,7 @@ async function processBatchDownload(downloadId, urls, platform, options) {
 
       let outputPath;
 
-      if (itemPlatform === 'youtube') {
+      if (['youtube', 'tiktok', 'instagram', 'twitter'].includes(itemPlatform)) {
         outputPath = await youtubeService.download(url, options, progressCallback);
         outputPath = await applyPostProcessing(outputPath, options, null);
       } else if (itemPlatform === 'spotify') {

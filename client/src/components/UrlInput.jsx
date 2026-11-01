@@ -1,13 +1,24 @@
 /**
  * UrlInput.jsx
- * Smart URL input with auto-platform detection (YouTube/Spotify badges),
- * paste detection, loading spinner, and keyboard shortcuts.
+ * Smart URL & Search input with auto-platform detection (YouTube, Spotify, Instagram, TikTok, Twitter/X),
+ * direct song/video search mode, paste detection, and loading state.
  */
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Link2, Search, Loader2, Youtube, Music2, Clipboard, X } from 'lucide-react';
+import {
+  Link2,
+  Search,
+  Loader2,
+  Youtube,
+  Music2,
+  Clipboard,
+  X,
+  Sparkles,
+  Compass,
+} from 'lucide-react';
 import { detectPlatform } from '../utils/formatDetector';
+import { InstagramIcon, TikTokIcon, TwitterIcon } from './ui/Brand';
 
 // ============================================
 // Platform badge configurations
@@ -29,19 +40,47 @@ const PLATFORM_BADGES = {
     text: 'text-green-400',
     glow: 'shadow-[0_0_15px_rgba(34,197,94,0.2)]',
   },
+  tiktok: {
+    label: 'TikTok',
+    icon: TikTokIcon,
+    bg: 'bg-cyan-500/15',
+    border: 'border-cyan-500/30',
+    text: 'text-cyan-400',
+    glow: 'shadow-[0_0_15px_rgba(6,182,212,0.2)]',
+  },
+  instagram: {
+    label: 'Instagram',
+    icon: InstagramIcon,
+    bg: 'bg-pink-500/15',
+    border: 'border-pink-500/30',
+    text: 'text-pink-400',
+    glow: 'shadow-[0_0_15px_rgba(236,72,153,0.2)]',
+  },
+  twitter: {
+    label: 'Twitter / X',
+    icon: TwitterIcon,
+    bg: 'bg-zinc-500/15',
+    border: 'border-zinc-500/30',
+    text: 'text-zinc-300',
+    glow: 'shadow-[0_0_15px_rgba(255,255,255,0.1)]',
+  },
 };
 
 /**
- * Smart URL input component.
- * @param {object} props
- * @param {Function} props.onAnalyze - Called with (url) when user submits
- * @param {boolean} props.isLoading - Whether analysis is in progress
- * @param {string} props.platform - Currently detected platform
- * @param {Function} props.onPlatformChange - Called when platform detection changes
+ * Smart URL and Search input component.
  */
-export default function UrlInput({ value = '', onAnalyze, isLoading, platform, onPlatformChange }) {
+export default function UrlInput({
+  value = '',
+  onAnalyze,
+  onSearch,
+  isLoading,
+  platform,
+  onPlatformChange,
+  platformMode = 'all',
+}) {
   const [url, setUrl] = useState(value);
   const [isFocused, setIsFocused] = useState(false);
+  const [inputMode, setInputMode] = useState('auto'); // 'auto', 'search'
   const inputRef = useRef(null);
 
   // Keep local input in sync with external value if provided
@@ -56,6 +95,17 @@ export default function UrlInput({ value = '', onAnalyze, isLoading, platform, o
     const detected = detectPlatform(url);
     onPlatformChange?.(detected);
   }, [url, onPlatformChange]);
+
+  const isUrlLike = (text) => {
+    const t = text.trim();
+    return (
+      /^https?:\/\//i.test(t) ||
+      /^www\./i.test(t) ||
+      t.includes('.com') ||
+      t.includes('.be') ||
+      detectPlatform(t) !== null
+    );
+  };
 
   /**
    * Handle paste events — auto-detect and auto-analyze reliably from clipboard data.
@@ -81,32 +131,43 @@ export default function UrlInput({ value = '', onAnalyze, isLoading, platform, o
     (e) => {
       e?.preventDefault();
       const trimmed = url.trim();
-      if (trimmed && !isLoading) {
-        onAnalyze?.(trimmed);
-      }
-    },
-    [url, isLoading, onAnalyze]
-  );
+      if (!trimmed || isLoading) return;
 
-  /**
-   * Handle keyboard shortcuts.
-   */
-  const handleKeyDown = useCallback(
-    (e) => {
-      if (e.key === 'Enter') {
-        handleSubmit(e);
+      if (isUrlLike(trimmed)) {
+        onAnalyze?.(trimmed);
+      } else {
+        // Plain text query: trigger search
+        onSearch?.(trimmed);
       }
     },
-    [handleSubmit]
+    [url, isLoading, onAnalyze, onSearch]
   );
 
   const badgeConfig = platform ? PLATFORM_BADGES[platform] : null;
 
+  // Placeholder customized per active platform mode
+  const getPlaceholder = () => {
+    switch (platformMode) {
+      case 'instagram':
+        return 'Instagram Reels veya Gönderi bağlantısını yapıştırın...';
+      case 'tiktok':
+        return 'TikTok video bağlantısını yapıştırın (filigransız indirilir)...';
+      case 'twitter':
+        return 'Twitter / X video bağlantısını yapıştırın...';
+      case 'spotify':
+        return 'Spotify parça veya çalma listesi bağlantısı ya da şarkı adı yazın...';
+      case 'youtube':
+        return 'YouTube video veya Shorts bağlantısı ya da şarkı adı yazın...';
+      default:
+        return 'Bağlantı yapıştırın veya doğrudan şarkı / sanatçı adı aratın...';
+    }
+  };
+
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
+      initial={{ opacity: 0, y: 15 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.6, ease: 'easeOut' }}
+      transition={{ duration: 0.4, ease: 'easeOut' }}
       className="w-full max-w-2xl mx-auto"
     >
       {/* Main input container */}
@@ -114,37 +175,40 @@ export default function UrlInput({ value = '', onAnalyze, isLoading, platform, o
         <div
           className={`
             relative flex items-center rounded-2xl overflow-hidden transition-all duration-300
-            glass
-            ${isFocused ? 'ring-2 ring-neon-cyan/30 neon-glow' : 'ring-1 ring-white/10'}
+            bg-ink-900/90 backdrop-blur-md border
+            ${
+              isFocused
+                ? 'border-brand-500/50 shadow-[0_0_25px_-5px_rgba(99,102,241,0.25)] ring-1 ring-brand-500/30'
+                : 'border-white/[0.08] hover:border-white/[0.14]'
+            }
           `}
         >
-          {/* Link icon prefix */}
-          <div className="pl-5 pr-2 flex items-center">
-            <Link2 className="w-5 h-5 text-white/30" />
+          {/* Leading Icon */}
+          <div className="pl-4 pr-1 flex items-center text-zinc-400">
+            {url && !isUrlLike(url) ? (
+              <Search className="w-5 h-5 text-brand-400" />
+            ) : (
+              <Link2 className="w-5 h-5 text-zinc-400" />
+            )}
           </div>
 
           {/* Text input */}
           <input
             ref={inputRef}
-            type="url"
+            type="text"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             onPaste={handlePaste}
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}
-            onKeyDown={handleKeyDown}
-            placeholder="YouTube veya Spotify bağlantısını buraya yapıştırın..."
+            placeholder={getPlaceholder()}
             disabled={isLoading}
-            className={`
-              flex-1 bg-transparent py-4 px-2 text-white placeholder-white/30
-              outline-none text-base font-medium
-              disabled:opacity-50 disabled:cursor-not-allowed
-            `}
+            className="flex-1 bg-transparent py-4 px-3 text-white placeholder-zinc-500 outline-none text-sm sm:text-base font-normal disabled:opacity-50 disabled:cursor-not-allowed"
             autoComplete="off"
             spellCheck="false"
           />
 
-          {/* Clear button if URL is entered */}
+          {/* Clear button if text is entered */}
           {url && !isLoading && (
             <button
               type="button"
@@ -153,7 +217,7 @@ export default function UrlInput({ value = '', onAnalyze, isLoading, platform, o
                 onPlatformChange?.(null);
                 inputRef.current?.focus();
               }}
-              className="p-1 mr-2 text-white/30 hover:text-white/70 transition-colors"
+              className="p-1.5 mr-2 rounded-lg text-zinc-400 hover:text-white hover:bg-white/[0.05] transition-colors"
               title="Temizle"
             >
               <X className="w-4 h-4" />
@@ -170,53 +234,60 @@ export default function UrlInput({ value = '', onAnalyze, isLoading, platform, o
                 exit={{ opacity: 0, scale: 0.8, x: 10 }}
                 transition={{ type: 'spring', stiffness: 500, damping: 30 }}
                 className={`
-                  flex items-center gap-1.5 px-3 py-1.5 mr-2 rounded-lg border text-xs font-semibold
+                  hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 mr-2 rounded-lg border text-xs font-semibold
                   ${badgeConfig.bg} ${badgeConfig.border} ${badgeConfig.text} ${badgeConfig.glow}
                 `}
               >
                 <badgeConfig.icon className="w-3.5 h-3.5" />
-                {badgeConfig.label}
+                <span>{badgeConfig.label}</span>
               </motion.div>
             )}
           </AnimatePresence>
 
-          {/* Analyze button */}
+          {/* Action Button: Analiz Et or Ara */}
           <button
             type="submit"
             disabled={!url.trim() || isLoading}
             className={`
-              flex items-center gap-2 px-6 py-4 font-semibold text-sm
-              bg-gradient-to-r from-neon-cyan/20 to-neon-purple/20
-              hover:from-neon-cyan/30 hover:to-neon-purple/30
-              border-l border-white/10
-              transition-all duration-300
+              flex items-center gap-2 px-5 sm:px-6 py-4 font-medium text-xs sm:text-sm
+              border-l border-white/[0.08]
+              transition-all duration-200
               disabled:opacity-30 disabled:cursor-not-allowed
-              hover:shadow-[0_0_30px_rgba(0,240,255,0.15)]
-              active:scale-95
+              ${
+                url && !isUrlLike(url)
+                  ? 'bg-brand-500/20 text-brand-300 hover:bg-brand-500 hover:text-white'
+                  : 'bg-white/[0.04] text-zinc-200 hover:bg-white/[0.08] hover:text-white'
+              }
             `}
           >
             {isLoading ? (
-              <Loader2 className="w-5 h-5 text-neon-cyan animate-spin" />
+              <Loader2 className="w-4 h-4 text-brand-400 animate-spin" />
+            ) : url && !isUrlLike(url) ? (
+              <Search className="w-4 h-4" />
             ) : (
-              <Search className="w-5 h-5 text-neon-cyan" />
+              <Sparkles className="w-4 h-4 text-brand-400" />
             )}
-            <span className="text-white/90 hidden sm:inline">
-              {isLoading ? 'Analiz Ediliyor...' : 'Analiz Et'}
+            <span>
+              {isLoading
+                ? 'İşleniyor…'
+                : url && !isUrlLike(url)
+                ? 'Ara'
+                : 'Analiz Et'}
             </span>
           </button>
         </div>
       </form>
 
-      {/* Hint text */}
-      <motion.p
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.3 }}
-        className="text-center text-white/40 text-xs mt-3 flex items-center justify-center gap-1.5"
-      >
-        <Clipboard className="w-3.5 h-3.5 text-neon-cyan" />
-        Bağlantıyı yapıştırın veya yazıp Enter tuşuna basın
-      </motion.p>
+      {/* Quick helper tip */}
+      <div className="flex items-center justify-between text-xs text-zinc-500 mt-2.5 px-2">
+        <span className="flex items-center gap-1.5">
+          <Clipboard className="w-3.5 h-3.5 text-zinc-400" />
+          <span>Bağlantı yapıştırabilir veya direkt şarkı aratabilirsiniz</span>
+        </span>
+        <span className="hidden sm:inline font-mono text-[11px] text-zinc-600">
+          Enter ↵
+        </span>
+      </div>
     </motion.div>
   );
 }

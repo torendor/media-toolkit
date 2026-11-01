@@ -223,6 +223,24 @@ export async function cancelDownload(downloadId) {
 }
 
 /**
+ * Search videos and music tracks directly by query string.
+ * @param {string} query - Search term
+ * @param {number} [limit=8] - Number of items to return
+ */
+export async function searchMedia(query, limit = 8) {
+  try {
+    const response = await api.get('/search', { params: { q: query, limit } });
+    return response.data;
+  } catch (err) {
+    // If backend is offline or unreachable directly, try edge search proxy
+    const res = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=${limit}`);
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || !json.success) throw new Error(json.error || 'Arama yapılamadı');
+    return json;
+  }
+}
+
+/**
  * Live Turkish chart (Spotify Top 50 - Turkey). Served by the edge function in
  * production and by the local server in development (via Vite proxy).
  */

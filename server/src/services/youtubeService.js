@@ -25,17 +25,20 @@ const DOWNLOAD_DIR = path.resolve(process.env.DOWNLOAD_DIR || './downloads');
  * @returns {Promise<Object>} Structured video metadata
  * @throws {Error} If yt-dlp fails or returns invalid JSON
  */
-async function getInfo(url) {
+async function getInfo(url, platformOverride = null) {
   return new Promise((resolve, reject) => {
     const args = [
       '--dump-json',
-      '--extractor-args',
-      'youtube:player_client=tv_samsung,visionos,web_creator',
       '--no-warnings',
       '--no-playlist',
       '--skip-download',
-      url,
     ];
+
+    if (!platformOverride || platformOverride === 'youtube') {
+      args.push('--extractor-args', 'youtube:player_client=tv_samsung,visionos,web_creator');
+    }
+
+    args.push(url);
 
     const proc = spawn(getYtdlpPath(), args, { windowsHide: true });
     let stdout = '';
@@ -56,7 +59,7 @@ async function getInfo(url) {
 
       try {
         const info = JSON.parse(stdout.trim());
-        resolve(formatVideoInfo(info));
+        resolve(formatVideoInfo(info, platformOverride));
       } catch (parseErr) {
         reject(new Error(`Failed to parse yt-dlp output: ${parseErr.message}`));
       }
@@ -322,7 +325,7 @@ function mapBitrateToQuality(bitrate) {
  * @param {Object} raw - Raw yt-dlp --dump-json output
  * @returns {Object} Structured video metadata
  */
-function formatVideoInfo(raw) {
+function formatVideoInfo(raw, platformOverride = null) {
   // Gather available format options
   const formats = (raw.formats || [])
     .filter((f) => f.height || f.abr)
@@ -344,8 +347,15 @@ function formatVideoInfo(raw) {
     return parseInt(b) - parseInt(a);
   });
 
+  const detectedPlatform = platformOverride || (
+    raw.extractor_key?.toLowerCase().includes('tiktok') ? 'tiktok' :
+    raw.extractor_key?.toLowerCase().includes('instagram') ? 'instagram' :
+    raw.extractor_key?.toLowerCase().includes('twitter') ? 'twitter' :
+    'youtube'
+  );
+
   return {
-    platform: 'youtube',
+    platform: detectedPlatform,
     type: 'video',
     id: raw.id,
     title: raw.title || 'Unknown Title',

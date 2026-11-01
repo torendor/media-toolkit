@@ -57,7 +57,7 @@ router.post(
       if (platform === 'unknown') {
         return res.status(400).json({
           success: false,
-          error: 'Unsupported URL. Please provide a YouTube or Spotify link.',
+          error: 'Desteklenmeyen bağlantı formatı. Lütfen YouTube, Spotify, TikTok, Instagram veya Twitter/X bağlantısı girin.',
         });
       }
 
@@ -67,6 +67,8 @@ router.post(
         data = await analyzeYouTube(url);
       } else if (platform === 'spotify') {
         data = await analyzeSpotify(url);
+      } else if (['tiktok', 'instagram', 'twitter'].includes(platform)) {
+        data = await youtubeService.getInfo(url, platform);
       }
 
       return res.json({

@@ -33,10 +33,19 @@ const SPOTIFY_PATTERNS = {
   playlist: /(?:https?:\/\/)?open\.spotify\.com\/(?:intl-[a-zA-Z0-9-]+\/)?playlist\/([a-zA-Z0-9]+)/,
 };
 
+// ============================================
+// Social Media URL patterns
+// ============================================
+const SOCIAL_PATTERNS = {
+  tiktok: /(?:https?:\/\/)?(?:www\.|vm\.|vt\.)?tiktok\.com\//i,
+  instagram: /(?:https?:\/\/)?(?:www\.)?(?:instagram\.com|instagr\.am)\//i,
+  twitter: /(?:https?:\/\/)?(?:www\.)?(?:twitter\.com|x\.com)\//i,
+};
+
 /**
  * Detect the platform from a given URL.
  * @param {string} url - The URL to analyze
- * @returns {'youtube' | 'spotify' | null} The detected platform
+ * @returns {'youtube' | 'spotify' | 'tiktok' | 'instagram' | 'twitter' | null} The detected platform
  */
 export function detectPlatform(url) {
   if (!url || typeof url !== 'string') return null;
@@ -56,6 +65,15 @@ export function detectPlatform(url) {
   );
 
   if (isSpotify) return 'spotify';
+
+  // Check TikTok patterns
+  if (SOCIAL_PATTERNS.tiktok.test(trimmedUrl)) return 'tiktok';
+
+  // Check Instagram patterns
+  if (SOCIAL_PATTERNS.instagram.test(trimmedUrl)) return 'instagram';
+
+  // Check Twitter / X patterns
+  if (SOCIAL_PATTERNS.twitter.test(trimmedUrl)) return 'twitter';
 
   return null;
 }

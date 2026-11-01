@@ -32,9 +32,18 @@ const SPOTIFY_PATTERNS = {
 };
 
 /**
+ * Regular expressions for matching Social Media URL formats.
+ */
+const SOCIAL_PATTERNS = {
+  tiktok: /(?:https?:\/\/)?(?:www\.|vm\.|vt\.)?tiktok\.com\//i,
+  instagram: /(?:https?:\/\/)?(?:www\.)?(?:instagram\.com|instagr\.am)\//i,
+  twitter: /(?:https?:\/\/)?(?:www\.)?(?:twitter\.com|x\.com)\//i,
+};
+
+/**
  * Detect which platform a URL belongs to.
  * @param {string} url - The URL to analyze
- * @returns {'youtube'|'spotify'|'unknown'} The detected platform
+ * @returns {'youtube'|'spotify'|'tiktok'|'instagram'|'twitter'|'unknown'} The detected platform
  */
 function detectPlatform(url) {
   if (!url || typeof url !== 'string') return 'unknown';
@@ -56,6 +65,21 @@ function detectPlatform(url) {
     normalizedUrl.startsWith('spotify:')
   ) {
     return 'spotify';
+  }
+
+  // Check TikTok patterns
+  if (SOCIAL_PATTERNS.tiktok.test(url)) {
+    return 'tiktok';
+  }
+
+  // Check Instagram patterns
+  if (SOCIAL_PATTERNS.instagram.test(url)) {
+    return 'instagram';
+  }
+
+  // Check Twitter / X patterns
+  if (SOCIAL_PATTERNS.twitter.test(url)) {
+    return 'twitter';
   }
 
   return 'unknown';

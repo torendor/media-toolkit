@@ -8,6 +8,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { Clock, Eye, User, Music, ListMusic, Youtube, Music2 } from 'lucide-react';
 import SmartImage from './SmartImage';
+import { InstagramIcon, TikTokIcon, TwitterIcon } from './ui/Brand';
 
 // ============================================
 // Platform badge config (small version)
@@ -22,6 +23,21 @@ const PLATFORM_BADGE = {
     label: 'Spotify',
     icon: Music2,
     className: 'bg-green-500/15 text-green-400 border-green-500/30',
+  },
+  tiktok: {
+    label: 'TikTok',
+    icon: TikTokIcon,
+    className: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30',
+  },
+  instagram: {
+    label: 'Instagram',
+    icon: InstagramIcon,
+    className: 'bg-pink-500/15 text-pink-400 border-pink-500/30',
+  },
+  twitter: {
+    label: 'Twitter / X',
+    icon: TwitterIcon,
+    className: 'bg-zinc-500/15 text-zinc-300 border-zinc-500/30',
   },
 };
 
