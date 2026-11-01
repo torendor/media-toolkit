@@ -30,7 +30,7 @@ async function getInfo(url) {
     const args = [
       '--dump-json',
       '--extractor-args',
-      'youtube:player_client=android',
+      'youtube:player_client=tv_samsung,visionos,web_creator',
       '--no-warnings',
       '--no-playlist',
       '--skip-download',
@@ -155,8 +155,10 @@ async function download(url, options = {}, progressCallback = null) {
     path.join(DOWNLOAD_DIR, '%(title)s.%(ext)s');
 
   const args = buildFormatArgs(options);
-  // Force android player client to bypass YouTube datacenter bot detection
-  args.push('--extractor-args', 'youtube:player_client=android');
+  // Multi-tier client strategy: TV Samsung, VisionOS, Web Creator
+  // Completely immune to YouTube datacenter bot blocks and SABR throttling
+  args.push('--extractor-args', 'youtube:player_client=tv_samsung,visionos,web_creator');
+  args.push('--concurrent-fragments', '4');
   if (LOCAL_BIN && fs.existsSync(path.join(LOCAL_BIN, 'ffmpeg.exe'))) {
     args.push('--ffmpeg-location', LOCAL_BIN);
   } else {
