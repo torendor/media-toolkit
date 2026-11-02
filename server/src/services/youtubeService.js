@@ -67,7 +67,7 @@ async function getInfo(url, platformOverride = null) {
     ];
 
     if (!platformOverride || platformOverride === 'youtube') {
-      args.push('--extractor-args', 'youtube:player_client=tv_samsung,visionos,web_creator');
+      args.push('--extractor-args', 'youtube:player_client=android,ios,web');
     }
 
     args.push(url);
@@ -192,9 +192,9 @@ async function download(url, options = {}, progressCallback = null) {
 
   const args = buildFormatArgs(options);
   args.push(...getAuthArgs());
-  // Multi-tier client strategy: TV Samsung, VisionOS, Web Creator
-  // Solves YouTube bot verification & SABR throttling via JS runtime (node/deno)
-  args.push('--extractor-args', 'youtube:player_client=tv_samsung,visionos,web_creator');
+  // Multi-tier client strategy: Android, iOS, Web
+  // Solves YouTube bot verification & SABR throttling seamlessly
+  args.push('--extractor-args', 'youtube:player_client=android,ios,web');
   args.push('--js-runtime', 'node');
   args.push('--concurrent-fragments', '4');
   if (LOCAL_BIN && fs.existsSync(path.join(LOCAL_BIN, 'ffmpeg.exe'))) {

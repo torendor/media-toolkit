@@ -77,6 +77,8 @@ function performSearch(q, limit) {
       searchTarget,
       '--dump-single-json',
       '--flat-playlist',
+      '--extractor-args',
+      'youtube:player_client=android,ios,web',
       '--no-warnings',
     ];
 

@@ -13,3 +13,4 @@ services:
         value: production
       - key: YOUTUBE_COOKIES_BASE64
         sync: false
+
