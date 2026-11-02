@@ -238,6 +238,18 @@ export function getDownloadUrl(downloadId) {
   return `${getApiBaseUrl()}/api/download/file/${downloadId}`;
 }
 
+/** Get direct CDN stream URL (Client-Side download fallback). */
+export async function getStreamUrl(params) {
+  const response = await api.post('/download/stream-url', params);
+  return response.data;
+}
+
+/** Build direct browser redirect link for one-click client download. */
+export function getDirectDownloadLink(url, format = 'video', quality = 'best') {
+  const base = getApiBaseUrl();
+  return `${base}/api/download/direct?url=${encodeURIComponent(url)}&format=${encodeURIComponent(format)}&quality=${encodeURIComponent(quality)}`;
+}
+
 /** SSE progress URL. */
 export function getProgressUrl(downloadId) {
   return `${getApiBaseUrl()}/api/download/progress/${downloadId}`;

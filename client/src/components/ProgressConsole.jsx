@@ -132,6 +132,7 @@ export default function ProgressConsole({
   onCancel,
   onDownloadFile,
   onReset,
+  onDirectDownload,
 }) {
   const stageConfig = STAGE_CONFIG[stage] || STAGE_CONFIG.downloading;
   const StageIcon = stageConfig.icon;
@@ -330,16 +331,25 @@ export default function ProgressConsole({
           </motion.div>
         )}
 
-        {/* Error retry */}
+        {/* Error retry / direct download fallback */}
         {isError && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="flex justify-center"
+            className="flex flex-col sm:flex-row gap-2.5 justify-center items-center"
           >
+            {onDirectDownload && (
+              <button
+                onClick={onDirectDownload}
+                className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/30 transition-all duration-200 text-sm font-semibold flex items-center justify-center gap-2 shadow-lg"
+              >
+                <Download className="w-4 h-4 text-amber-400" />
+                İstemci Taraflı İndir (Doğrudan Akış Fallback)
+              </button>
+            )}
             <button
               onClick={onReset}
-              className="px-6 py-3 rounded-xl bg-white/5 border border-white/10 text-white/70 hover:bg-white/10 hover:text-white transition-all duration-200 text-sm font-medium"
+              className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white/70 hover:bg-white/10 hover:text-white transition-all duration-200 text-sm font-medium"
             >
               Tekrar Dene
             </button>

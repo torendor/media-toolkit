@@ -51,6 +51,7 @@ class DownloadManager {
       stage: 'pending',
       message: 'Initializing download...',
       filePath: null,
+      fileUrl: null,
       fileName: null,
       error: null,
       createdAt: new Date(),

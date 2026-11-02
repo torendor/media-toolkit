@@ -16,11 +16,14 @@ server/bin/ffplay.exe
 server/bin/yt-dlp.exe
 server/bin/cloudflared.exe
 
-# Local environment
+# Local environment & secrets
 .env
 .env.local
 server/.env
 client/.env
+*cookie*.txt
+*.cookies
+.yt_cookies.txt
 
 # System files
 .DS_Store

@@ -15,6 +15,7 @@ import {
   getDownloadUrl,
   cancelDownload as apiCancelDownload,
   getProgressUrl,
+  getStreamUrl,
 } from '../utils/api';
 import { translateServerMessage } from '../utils/format';
 
@@ -74,12 +75,16 @@ function triggerBrowserDownload(url, fileName) {
     const link = document.createElement('a');
     link.href = url;
     link.setAttribute('download', fileName || 'download');
-    link.rel = 'noopener';
+    link.setAttribute('target', '_blank');
+    link.rel = 'noopener noreferrer';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   } catch (err) {
     console.warn('Download trigger error:', err);
+    if (typeof window !== 'undefined') {
+      window.open(url, '_blank');
+    }
   }
 }
 
@@ -151,7 +156,7 @@ export function useDownload(onToast) {
         if (data.stage === 'complete') {
           eventSource.close();
           eventSourceRef.current = null;
-          const fileUrl = getDownloadUrl(downloadId);
+          const fileUrl = data.fileUrl || getDownloadUrl(downloadId);
           const fileName = data.fileName || null;
 
           setState((prev) => ({
@@ -321,11 +326,68 @@ export function useDownload(onToast) {
     setState(INITIAL_STATE);
   }, [cleanup]);
 
+  /**
+   * Client-side direct stream download (bypasses server download & bot IP restrictions).
+   */
+  const startDirectDownload = useCallback(
+    async ({ url, format = 'video', quality = 'best' }) => {
+      cleanup();
+      const runId = ++runIdRef.current;
+      lastRequestRef.current = { kind: 'direct', params: { url, format, quality } };
+
+      setState({
+        ...INITIAL_STATE,
+        isActive: true,
+        stage: 'downloading',
+        message: 'Doğrudan akış bağlantısı alınıyor…',
+        logs: appendLog([], 'İstemci taraflı doğrudan akış bağlantısı hazırlanıyor…'),
+      });
+
+      try {
+        const res = await getStreamUrl({ url, format, quality });
+        if (runId !== runIdRef.current) return;
+
+        if (!res?.success || !res?.data?.streamUrl) {
+          throw new Error(res?.error || 'Doğrudan akış bağlantısı alınamadı.');
+        }
+
+        const { streamUrl, fileName, title } = res.data;
+        const finalName = fileName || `${title || 'media'}.${format === 'audio' ? 'm4a' : 'mp4'}`;
+
+        setState((prev) => ({
+          ...prev,
+          progress: 100,
+          stage: 'complete',
+          isActive: false,
+          fileUrl: streamUrl,
+          fileName: finalName,
+          message: 'Doğrudan akış bağlantısı hazır! İndirme başlatılıyor…',
+          logs: appendLog(prev.logs, `Doğrudan bağlantı alındı: ${finalName}`),
+        }));
+
+        triggerBrowserDownload(streamUrl, finalName);
+        onToast?.('success', 'Doğrudan akış indirmesi başlatıldı!');
+      } catch (err) {
+        if (runId !== runIdRef.current) return;
+        const msg = err?.message || 'Doğrudan akış alınamadı.';
+        setState({
+          ...INITIAL_STATE,
+          stage: 'error',
+          error: msg,
+          logs: appendLog([], msg),
+        });
+        onToast?.('error', msg);
+      }
+    },
+    [cleanup, onToast]
+  );
+
   return {
     ...state,
     canRetry: !!lastRequestRef.current,
     startDownload,
     startBatch,
+    startDirectDownload,
     retry,
     downloadFile,
     cancel,

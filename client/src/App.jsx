@@ -897,6 +897,13 @@ export default function App() {
                 onCancel={download.cancel}
                 onDownloadFile={download.downloadFile}
                 onReset={handleReset}
+                onDirectDownload={() => {
+                  download.startDirectDownload({
+                    url: currentUrl,
+                    format: platform === 'spotify' ? 'audio' : 'video',
+                    quality: 'best',
+                  });
+                }}
               />
             )}
           </AnimatePresence>

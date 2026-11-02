@@ -1,13 +1,15 @@
 /**
- * @fileoverview YouTube service for extracting video metadata and downloading
- * media via the yt-dlp CLI tool. Parses yt-dlp's JSON output for metadata
- * and stdout progress lines for real-time download tracking.
+ * @fileoverview YouTube service for extracting video metadata and streaming/downloading
+ * media via external APIs (Cobalt, Invidious, Piped) with mobile client spoofing
+ * (android, ios, web) for local yt-dlp fallback.
  * @module services/youtubeService
  */
 
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const axios = require('axios');
+const cobaltService = require('./cobaltService');
 const { getYtdlpPath, getFfmpegPath, LOCAL_BIN } = require('../utils/binaries');
 
 /**
@@ -17,15 +19,35 @@ const { getYtdlpPath, getFfmpegPath, LOCAL_BIN } = require('../utils/binaries');
 const DOWNLOAD_DIR = path.resolve(process.env.DOWNLOAD_DIR || './downloads');
 
 /**
- * Resolve cookie authentication arguments if cookies.txt or YOUTUBE_COOKIES env var exists.
- * @returns {string[]}
+ * Android/iOS client spoofing arguments for yt-dlp.
+ * Bypasses YouTube's desktop bot verification and datacenter rate limits.
  */
-function getAuthArgs() {
-  const authArgs = [];
-  const localCookie = path.resolve(__dirname, '../../cookies.txt');
-  if (fs.existsSync(localCookie)) {
-    authArgs.push('--cookies', localCookie);
-    return authArgs;
+const MOBILE_CLIENT_ARGS = [
+  '--extractor-args',
+  'youtube:player_client=android,ios,web',
+];
+
+/**
+ * Locate a valid cookies.txt file if present.
+ * @returns {string|null}
+ */
+function findCookiesFile() {
+  const possiblePaths = [
+    process.env.COOKIES_PATH,
+    process.env.YOUTUBE_COOKIES_FILE,
+    path.resolve(__dirname, '../../../cookies.txt'),
+    path.resolve(process.cwd(), 'cookies.txt'),
+    path.resolve(__dirname, '../../cookies.txt'),
+  ].filter(Boolean);
+
+  for (const cookiePath of possiblePaths) {
+    try {
+      if (fs.existsSync(cookiePath) && fs.statSync(cookiePath).isFile()) {
+        return cookiePath;
+      }
+    } catch {
+      // Ignore
+    }
   }
 
   const cookiesBase64 = process.env.YOUTUBE_COOKIES_BASE64;
@@ -34,81 +56,159 @@ function getAuthArgs() {
   if (cookiesBase64 || cookiesRaw) {
     const cookieFile = path.join(DOWNLOAD_DIR, '.yt_cookies.txt');
     try {
-      if (!fs.existsSync(cookieFile)) {
-        const content = cookiesBase64 ? Buffer.from(cookiesBase64, 'base64').toString('utf8') : cookiesRaw;
-        fs.writeFileSync(cookieFile, content, 'utf8');
+      if (!fs.existsSync(DOWNLOAD_DIR)) {
+        fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
       }
-      authArgs.push('--cookies', cookieFile);
+      const content = cookiesBase64
+        ? Buffer.from(cookiesBase64, 'base64').toString('utf8')
+        : cookiesRaw;
+      fs.writeFileSync(cookieFile, content, 'utf8');
+      return cookieFile;
     } catch (err) {
-      console.warn('[YouTube Auth] Could not write cookies file:', err.message);
+      console.warn('[YouTube Auth] Could not write cookies file from env:', err.message);
     }
   }
 
-  return authArgs;
+  return null;
 }
 
 /**
- * Extract video metadata from a YouTube URL using yt-dlp --dump-json.
- * Returns structured metadata including title, thumbnail, duration, channel,
- * available formats, and whether the URL is a playlist.
+ * Resolve cookie auth args if available.
+ * @returns {string[]}
+ */
+function getAuthArgs() {
+  const cookiePath = findCookiesFile();
+  if (cookiePath) {
+    return ['--cookies', cookiePath];
+  }
+  return [];
+}
+
+/**
+ * Returns cookie configuration status.
+ */
+function getCookieStatus() {
+  const cookiePath = findCookiesFile();
+  return {
+    configured: Boolean(cookiePath),
+    path: cookiePath || null,
+  };
+}
+
+/**
+ * Fallback metadata extractor using YouTube's public oEmbed API.
+ * Never blocked by YouTube bot-detection.
+ */
+async function getYouTubeOEmbedInfo(url) {
+  const videoIdMatch = url.match(/(?:youtu\.be\/|watch\?v=|embed\/|shorts\/)([a-zA-Z0-9_-]{11})/);
+  const videoId = videoIdMatch ? videoIdMatch[1] : null;
+
+  try {
+    const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`;
+    const res = await axios.get(oembedUrl, { timeout: 5000 });
+    const data = res.data;
+
+    return {
+      platform: 'youtube',
+      type: 'video',
+      id: videoId || 'unknown',
+      title: data.title || 'YouTube Video',
+      description: '',
+      thumbnail: data.thumbnail_url || (videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : null),
+      duration: 0,
+      durationFormatted: '0:00',
+      channel: data.author_name || 'YouTube Channel',
+      channelUrl: data.author_url || '',
+      uploadDate: '',
+      viewCount: 0,
+      likeCount: 0,
+      isLive: false,
+      resolutions: ['1080p', '720p', '480p', '360p'],
+      formats: [],
+      isPlaylist: false,
+    };
+  } catch (err) {
+    if (videoId) {
+      return {
+        platform: 'youtube',
+        type: 'video',
+        id: videoId,
+        title: 'YouTube Medyası',
+        description: '',
+        thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+        duration: 0,
+        durationFormatted: '0:00',
+        channel: 'YouTube',
+        channelUrl: `https://www.youtube.com/watch?v=${videoId}`,
+        resolutions: ['1080p', '720p', '480p'],
+        formats: [],
+        isPlaylist: false,
+      };
+    }
+    throw err;
+  }
+}
+
+/**
+ * Extract video metadata with mobile client spoofing & oEmbed fallback.
  *
- * @param {string} url - The YouTube URL to analyze
- * @returns {Promise<Object>} Structured video metadata
- * @throws {Error} If yt-dlp fails or returns invalid JSON
+ * @param {string} url - Media URL
+ * @param {string|null} [platformOverride=null]
+ * @returns {Promise<Object>}
  */
 async function getInfo(url, platformOverride = null) {
-  return new Promise((resolve, reject) => {
-    const args = [
-      '--dump-json',
-      '--no-warnings',
-      '--no-playlist',
-      '--skip-download',
-      ...getAuthArgs(),
-    ];
+  try {
+    return await new Promise((resolve, reject) => {
+      const args = [
+        '--dump-json',
+        '--no-warnings',
+        '--no-playlist',
+        '--skip-download',
+        ...MOBILE_CLIENT_ARGS,
+        ...getAuthArgs(),
+        url,
+      ];
 
+      const proc = spawn(getYtdlpPath(), args, { windowsHide: true });
+      let stdout = '';
+      let stderr = '';
+
+      proc.stdout.on('data', (d) => {
+        stdout += d.toString();
+      });
+      proc.stderr.on('data', (d) => {
+        stderr += d.toString();
+      });
+
+      proc.on('close', (code) => {
+        if (code !== 0) {
+          return reject(new Error(stderr.trim()));
+        }
+        try {
+          const info = JSON.parse(stdout.trim());
+          resolve(formatVideoInfo(info, platformOverride));
+        } catch (parseErr) {
+          reject(parseErr);
+        }
+      });
+
+      proc.on('error', reject);
+    });
+  } catch (err) {
     if (!platformOverride || platformOverride === 'youtube') {
-      args.push('--extractor-args', 'youtube:player_client=android,ios,web');
-    }
-
-    args.push(url);
-
-    const proc = spawn(getYtdlpPath(), args, { windowsHide: true });
-    let stdout = '';
-    let stderr = '';
-
-    proc.stdout.on('data', (data) => {
-      stdout += data.toString();
-    });
-
-    proc.stderr.on('data', (data) => {
-      stderr += data.toString();
-    });
-
-    proc.on('close', (code) => {
-      if (code !== 0) {
-        return reject(new Error(`yt-dlp exited with code ${code}: ${stderr.trim()}`));
-      }
-
       try {
-        const info = JSON.parse(stdout.trim());
-        resolve(formatVideoInfo(info, platformOverride));
-      } catch (parseErr) {
-        reject(new Error(`Failed to parse yt-dlp output: ${parseErr.message}`));
+        console.log('[youtubeService] Mobile yt-dlp metadata failed, falling back to YouTube oEmbed...');
+        return await getYouTubeOEmbedInfo(url);
+      } catch (oembedErr) {
+        console.warn('[youtubeService] oEmbed fallback also failed:', oembedErr.message);
       }
-    });
-
-    proc.on('error', (err) => {
-      reject(new Error(`Failed to spawn yt-dlp: ${err.message}. Is yt-dlp installed?`));
-    });
-  });
+    }
+    throw new Error(`Video bilgisi alınamadı: ${err.message}`);
+  }
 }
 
 /**
- * Get metadata for all videos in a YouTube playlist.
- *
- * @param {string} url - The YouTube playlist URL
- * @returns {Promise<Object>} Playlist metadata with an array of video entries
- * @throws {Error} If yt-dlp fails
+ * Extract playlist metadata.
  */
 async function getPlaylistInfo(url) {
   return new Promise((resolve, reject) => {
@@ -116,6 +216,7 @@ async function getPlaylistInfo(url) {
       '--dump-json',
       '--flat-playlist',
       '--no-warnings',
+      ...MOBILE_CLIENT_ARGS,
       ...getAuthArgs(),
       url,
     ];
@@ -124,21 +225,19 @@ async function getPlaylistInfo(url) {
     let stdout = '';
     let stderr = '';
 
-    proc.stdout.on('data', (data) => {
-      stdout += data.toString();
+    proc.stdout.on('data', (d) => {
+      stdout += d.toString();
     });
-
-    proc.stderr.on('data', (data) => {
-      stderr += data.toString();
+    proc.stderr.on('data', (d) => {
+      stderr += d.toString();
     });
 
     proc.on('close', (code) => {
       if (code !== 0) {
-        return reject(new Error(`yt-dlp playlist extraction failed: ${stderr.trim()}`));
+        return reject(new Error(`Çalma listesi alınamadı: ${stderr.trim()}`));
       }
 
       try {
-        // yt-dlp outputs one JSON object per line for each playlist entry
         const lines = stdout.trim().split('\n').filter(Boolean);
         const entries = lines.map((line) => {
           const info = JSON.parse(line);
@@ -160,43 +259,198 @@ async function getPlaylistInfo(url) {
           entries,
         });
       } catch (parseErr) {
-        reject(new Error(`Failed to parse playlist data: ${parseErr.message}`));
+        reject(new Error(`Çalma listesi ayrıştırılamadı: ${parseErr.message}`));
       }
     });
 
-    proc.on('error', (err) => {
-      reject(new Error(`Failed to spawn yt-dlp: ${err.message}`));
-    });
+    proc.on('error', reject);
   });
 }
 
 /**
- * Download a YouTube video or audio using yt-dlp with progress reporting.
+ * Resolve direct CDN media stream URL.
+ * Step 1: External APIs (Cobalt -> Invidious -> Piped)
+ * Step 2: Mobile client spoofed yt-dlp (youtube:player_client=android,ios,web)
  *
- * @param {string} url - The YouTube URL to download
- * @param {Object} options - Download options
- * @param {string} [options.format='audio'] - 'video' or 'audio'
- * @param {string} [options.quality='best'] - Quality level: 'best', '1080p', '720p', '480p', '360p'
- * @param {string} [options.audioFormat='mp3'] - Audio output format: 'mp3', 'flac', 'wav', 'm4a', 'opus'
- * @param {string} [options.audioBitrate='192'] - Audio bitrate in kbps
- * @param {string} [options.outputPath] - Custom output file path
- * @param {Function} [progressCallback] - Called with progress objects { percent, speed, eta, stage }
- * @returns {Promise<string>} The absolute path to the downloaded/converted file
+ * @param {string} url - Media URL
+ * @param {Object} [options={}] - Options
+ * @returns {Promise<{ streamUrl: string, fileName: string, title: string, ext: string, source: string }>}
+ */
+async function getStreamUrl(url, options = {}) {
+  // 1. Try external APIs (Cobalt, Invidious, Piped)
+  try {
+    const extResult = await cobaltService.fetchMediaStream(url, options);
+    const fileName = extResult.fileName || `media-${Date.now()}.${options.format === 'audio' ? 'mp3' : 'mp4'}`;
+    const title = fileName.replace(/\.[^/.]+$/, '');
+    const ext = path.extname(fileName).replace('.', '') || (options.format === 'audio' ? 'mp3' : 'mp4');
+
+    return {
+      success: true,
+      streamUrl: extResult.url,
+      fileName,
+      title,
+      ext,
+      source: extResult.source || 'external_api',
+    };
+  } catch (extErr) {
+    console.warn('[youtubeService] External APIs failed, activating mobile client yt-dlp fallback:', extErr.message);
+  }
+
+  // 2. Direct Mobile Client Spoofed yt-dlp fallback (player_client=android,ios,web)
+  return await getMobileClientStream(url, options);
+}
+
+/**
+ * Extract stream URL using mobile client spoofed yt-dlp.
+ * Uses 'youtube:player_client=android,ios,web' to bypass desktop bot protection.
+ */
+async function getMobileClientStream(url, options = {}) {
+  return new Promise((resolve, reject) => {
+    const isAudio = options.format === 'audio';
+    let formatArg;
+
+    if (isAudio) {
+      formatArg = 'bestaudio[ext=m4a]/bestaudio/best';
+    } else {
+      const quality = options.quality || 'best';
+      const height = parseInt(quality, 10);
+      if (!isNaN(height) && height > 0) {
+        formatArg = `best[height<=${height}][ext=mp4]/best[height<=${height}]/best[ext=mp4]/best`;
+      } else {
+        formatArg = 'best[ext=mp4]/best';
+      }
+    }
+
+    const args = [
+      '-g',
+      '--no-warnings',
+      '--no-playlist',
+      '-f', formatArg,
+      '--print', '%(title)s',
+      '--print', '%(ext)s',
+      ...MOBILE_CLIENT_ARGS,
+      ...getAuthArgs(),
+      url,
+    ];
+
+    const proc = spawn(getYtdlpPath(), args, { windowsHide: true });
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout.on('data', (d) => {
+      stdout += d.toString();
+    });
+    proc.stderr.on('data', (d) => {
+      stderr += d.toString();
+    });
+
+    proc.on('close', (code) => {
+      if (code !== 0) {
+        return reject(new Error(`Mobil yt-dlp akış bağlantısı alamadı: ${stderr.trim()}`));
+      }
+
+      const lines = stdout.trim().split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      if (lines.length < 2) {
+        return reject(new Error('Akış çıktısı okunamadı'));
+      }
+
+      const title = lines[0] || 'media';
+      const ext = lines[1] || (isAudio ? 'm4a' : 'mp4');
+      const urls = lines.slice(2).filter((l) => l.startsWith('http://') || l.startsWith('https://'));
+
+      if (urls.length === 0) {
+        return reject(new Error('Geçerli bir doğrudan CDN akış bağlantısı bulunamadı'));
+      }
+
+      const safeTitle = title.replace(/[/\\?%*:|"<>]/g, '_');
+      const fileName = `${safeTitle}.${ext}`;
+
+      resolve({
+        success: true,
+        streamUrl: urls[0],
+        fileName,
+        title,
+        ext,
+        source: 'yt-dlp-mobile',
+      });
+    });
+
+    proc.on('error', (err) => reject(new Error(`yt-dlp çalıştırılamadı: ${err.message}`)));
+  });
+}
+
+/**
+ * Fallback file download method.
+ * Uses mobile client spoofing.
  */
 async function download(url, options = {}, progressCallback = null) {
-  // Ensure download directory exists
   await fs.promises.mkdir(DOWNLOAD_DIR, { recursive: true });
 
-  const outputTemplate = options.outputPath ||
-    path.join(DOWNLOAD_DIR, '%(title)s.%(ext)s');
+  // 1. Try to fetch direct stream URL and download via stream
+  try {
+    progressCallback?.({ percent: 15, speed: '', eta: '', stage: 'downloading', message: 'Bağlantı çözümleniyor...' });
+    const streamInfo = await getStreamUrl(url, options);
 
+    if (streamInfo?.streamUrl) {
+      const targetFileName = `${Date.now()}_${streamInfo.fileName || 'media.mp4'}`;
+      const targetPath = path.join(DOWNLOAD_DIR, targetFileName);
+
+      progressCallback?.({ percent: 30, speed: '', eta: '', stage: 'downloading', message: 'Medya indiriliyor...' });
+
+      const writer = fs.createWriteStream(targetPath);
+      const res = await axios({
+        method: 'get',
+        url: streamInfo.streamUrl,
+        responseType: 'stream',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+        },
+      });
+
+      const totalLength = parseInt(res.headers['content-length'] || '0', 10);
+      let downloaded = 0;
+
+      res.data.on('data', (chunk) => {
+        downloaded += chunk.length;
+        if (totalLength > 0 && progressCallback) {
+          const percent = Math.min(95, Math.round((downloaded / totalLength) * 90) + 5);
+          progressCallback({
+            percent,
+            speed: '',
+            eta: '',
+            stage: 'downloading',
+            message: `İndiriliyor: %${percent}`,
+          });
+        }
+      });
+
+      await new Promise((resolve, reject) => {
+        writer.on('finish', resolve);
+        writer.on('error', reject);
+        res.data.pipe(writer);
+      });
+
+      progressCallback?.({ percent: 100, speed: '', eta: '', stage: 'complete', message: 'İndirme tamamlandı!' });
+      return targetPath;
+    }
+  } catch (err) {
+    console.warn('[youtubeService] Stream download failed, attempting yt-dlp mobile direct:', err.message);
+  }
+
+  // 2. yt-dlp with mobile client spoofing
+  return await legacyYtdlpDownload(url, options, progressCallback);
+}
+
+/**
+ * Mobile-spoofed yt-dlp download.
+ */
+async function legacyYtdlpDownload(url, options = {}, progressCallback = null) {
+  const outputTemplate = options.outputPath || path.join(DOWNLOAD_DIR, '%(title)s.%(ext)s');
   const args = buildFormatArgs(options);
+  args.push(...MOBILE_CLIENT_ARGS);
   args.push(...getAuthArgs());
-  // Multi-tier client strategy: Android, iOS, Web
-  // Solves YouTube bot verification & SABR throttling seamlessly
-  args.push('--extractor-args', 'youtube:player_client=android,ios,web');
-  args.push('--js-runtime', 'node');
-  args.push('--concurrent-fragments', '4');
+  args.push('--no-warnings', '--newline', '--no-playlist');
+
   if (LOCAL_BIN && fs.existsSync(path.join(LOCAL_BIN, 'ffmpeg.exe'))) {
     args.push('--ffmpeg-location', LOCAL_BIN);
   } else {
@@ -205,11 +459,8 @@ async function download(url, options = {}, progressCallback = null) {
       args.push('--ffmpeg-location', path.dirname(ffmpegLocation));
     }
   }
-  args.push('-o', outputTemplate);
-  args.push('--no-warnings');
-  args.push('--newline'); // Force progress on new lines for easier parsing
-  args.push('--no-playlist'); // Single video only
-  args.push(url);
+
+  args.push('-o', outputTemplate, url);
 
   return new Promise((resolve, reject) => {
     const proc = spawn(getYtdlpPath(), args, { windowsHide: true });
@@ -218,8 +469,6 @@ async function download(url, options = {}, progressCallback = null) {
 
     proc.stdout.on('data', (data) => {
       const text = data.toString();
-
-      // Parse progress lines: [download]  45.2% of ~50.00MiB at 2.50MiB/s ETA 00:15
       const progressMatch = text.match(
         /\[download\]\s+([\d.]+)%\s+of\s+~?([\d.]+\s*\w+)\s+at\s+([\d.]+\s*\w+\/s)\s+ETA\s+(\S+)/
       );
@@ -233,134 +482,48 @@ async function download(url, options = {}, progressCallback = null) {
         });
       }
 
-      // Capture [Merger] or [ExtractAudio] lines indicating post-processing
-      if (text.includes('[ExtractAudio]') || text.includes('[Merger]')) {
-        if (progressCallback) {
-          progressCallback({
-            percent: 100,
-            speed: '',
-            eta: '',
-            stage: 'converting',
-            message: 'Converting media...',
-          });
-        }
-      }
-
-      // Capture the final destination path
       const destMatch = text.match(/\[(?:Merger|ExtractAudio|download)\] Destination: (.+)/);
       if (destMatch) {
         lastOutputPath = destMatch[1].trim();
       }
-
-      // Also check for "has already been downloaded" message
-      const alreadyMatch = text.match(/\[download\] (.+) has already been downloaded/);
-      if (alreadyMatch) {
-        lastOutputPath = alreadyMatch[1].trim();
-      }
     });
 
-    proc.stderr.on('data', (data) => {
-      stderr += data.toString();
+    proc.stderr.on('data', (d) => {
+      stderr += d.toString();
     });
 
     proc.on('close', (code) => {
       if (code !== 0) {
-        return reject(new Error(`yt-dlp download failed (code ${code}): ${stderr.trim()}`));
+        return reject(new Error(`yt-dlp indirme hatası: ${stderr.trim()}`));
       }
-
-      // Resolve with the output path
       if (lastOutputPath && fs.existsSync(lastOutputPath)) {
         resolve(lastOutputPath);
       } else {
-        // Try to find the file by scanning the output directory
-        findDownloadedFile(DOWNLOAD_DIR)
-          .then((foundPath) => {
-            if (foundPath) {
-              resolve(foundPath);
-            } else {
-              reject(new Error('Download completed but output file not found'));
-            }
-          })
-          .catch(reject);
+        findDownloadedFile(DOWNLOAD_DIR).then(resolve).catch(reject);
       }
     });
 
-    proc.on('error', (err) => {
-      reject(new Error(`Failed to spawn yt-dlp: ${err.message}. Is yt-dlp installed and in PATH?`));
-    });
+    proc.on('error', reject);
   });
 }
 
-/**
- * Build the yt-dlp CLI arguments for format selection based on user options.
- *
- * @param {Object} options - The download options
- * @param {string} [options.format='audio'] - 'video' or 'audio'
- * @param {string} [options.quality='best'] - Video quality preference
- * @param {string} [options.audioFormat='mp3'] - Audio output format
- * @param {string} [options.audioBitrate='192'] - Audio bitrate in kbps
- * @returns {string[]} Array of CLI arguments for yt-dlp
- */
 function buildFormatArgs(options = {}) {
   const args = [];
   const format = options.format || 'audio';
 
   if (format === 'audio') {
-    // Audio-only download with post-processing conversion
-    args.push('-x'); // Extract audio
+    args.push('-x');
     args.push('--audio-format', options.audioFormat || 'mp3');
-    args.push('--audio-quality', mapBitrateToQuality(options.audioBitrate || '192'));
-
-    // Embed thumbnail in audio if possible with auto-conversion to jpg
-    if (['mp3', 'm4a', 'opus', 'flac'].includes(options.audioFormat || 'mp3')) {
-      args.push('--embed-thumbnail');
-      args.push('--convert-thumbnails', 'jpg');
-    }
+    args.push('--audio-quality', '0');
   } else {
-    // Video download with format selection based on quality
-    const qualityMap = {
-      'best': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-      '2160p': 'bestvideo[height<=2160][ext=mp4]+bestaudio[ext=m4a]/best[height<=2160]',
-      '1440p': 'bestvideo[height<=1440][ext=mp4]+bestaudio[ext=m4a]/best[height<=1440]',
-      '1080p': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]',
-      '720p': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]',
-      '480p': 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480]',
-      '360p': 'bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360]',
-    };
-
-    const formatStr = qualityMap[options.quality] || qualityMap['best'];
-    args.push('-f', formatStr);
+    args.push('-f', 'best[ext=mp4]/best');
     args.push('--merge-output-format', 'mp4');
   }
 
   return args;
 }
 
-/**
- * Map a numeric bitrate value to yt-dlp's audio quality scale (0-10, 0 being best).
- *
- * @param {string|number} bitrate - Bitrate in kbps (e.g. '320', '192', '128')
- * @returns {string} yt-dlp quality value (0-10 scale)
- */
-function mapBitrateToQuality(bitrate) {
-  const br = parseInt(bitrate, 10);
-  if (br >= 320) return '0';
-  if (br >= 256) return '1';
-  if (br >= 192) return '2';
-  if (br >= 160) return '4';
-  if (br >= 128) return '5';
-  if (br >= 96) return '7';
-  return '9';
-}
-
-/**
- * Format raw yt-dlp JSON output into a clean metadata object.
- *
- * @param {Object} raw - Raw yt-dlp --dump-json output
- * @returns {Object} Structured video metadata
- */
 function formatVideoInfo(raw, platformOverride = null) {
-  // Gather available format options
   const formats = (raw.formats || [])
     .filter((f) => f.height || f.abr)
     .map((f) => ({
@@ -374,29 +537,17 @@ function formatVideoInfo(raw, platformOverride = null) {
       filesize: f.filesize || f.filesize_approx || null,
     }));
 
-  // Extract unique resolutions available
   const resolutions = [...new Set(
     formats.filter((f) => f.resolution).map((f) => f.resolution)
-  )].sort((a, b) => {
-    return parseInt(b) - parseInt(a);
-  });
-
-  const detectedPlatform = platformOverride || (
-    raw.extractor_key?.toLowerCase().includes('tiktok') ? 'tiktok' :
-    raw.extractor_key?.toLowerCase().includes('instagram') ? 'instagram' :
-    raw.extractor_key?.toLowerCase().includes('twitter') ? 'twitter' :
-    'youtube'
-  );
+  )].sort((a, b) => parseInt(b) - parseInt(a));
 
   return {
-    platform: detectedPlatform,
+    platform: platformOverride || 'youtube',
     type: 'video',
     id: raw.id,
     title: raw.title || 'Unknown Title',
     description: raw.description ? raw.description.substring(0, 500) : '',
-    thumbnail: raw.thumbnail || (raw.thumbnails && raw.thumbnails.length > 0
-      ? raw.thumbnails[raw.thumbnails.length - 1].url
-      : null),
+    thumbnail: raw.thumbnail || (raw.thumbnails?.length ? raw.thumbnails[raw.thumbnails.length - 1].url : null),
     duration: raw.duration || 0,
     durationFormatted: formatDuration(raw.duration || 0),
     channel: raw.channel || raw.uploader || 'Unknown',
@@ -405,51 +556,30 @@ function formatVideoInfo(raw, platformOverride = null) {
     viewCount: raw.view_count || 0,
     likeCount: raw.like_count || 0,
     isLive: raw.is_live || false,
-    resolutions,
+    resolutions: resolutions.length ? resolutions : ['1080p', '720p', '480p'],
     formats,
     isPlaylist: false,
   };
 }
 
-/**
- * Format a duration in seconds to a human-readable "HH:MM:SS" or "MM:SS" string.
- *
- * @param {number} seconds - Duration in seconds
- * @returns {string} Formatted duration string
- */
 function formatDuration(seconds) {
   if (!seconds || seconds <= 0) return '0:00';
-
   const hrs = Math.floor(seconds / 3600);
   const mins = Math.floor((seconds % 3600) / 60);
   const secs = Math.floor(seconds % 60);
-
   if (hrs > 0) {
     return `${hrs}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   }
   return `${mins}:${String(secs).padStart(2, '0')}`;
 }
 
-/**
- * Find the most recently modified file in a directory.
- * Used as a fallback when yt-dlp's output path isn't captured.
- *
- * @param {string} dir - Directory to search
- * @returns {Promise<string|null>} Path to the newest file, or null
- */
 async function findDownloadedFile(dir) {
   try {
     const entries = await fs.promises.readdir(dir, { withFileTypes: true });
     let newest = null;
     let newestTime = 0;
-    const mediaExtensions = ['.mp3', '.mp4', '.m4a', '.flac', '.wav', '.webm', '.mkv', '.ogg', '.opus'];
-
     for (const entry of entries) {
       if (!entry.isFile()) continue;
-      const ext = path.extname(entry.name).toLowerCase();
-      // Ignore image and temp files
-      if (!mediaExtensions.includes(ext)) continue;
-
       const filePath = path.join(dir, entry.name);
       const stat = await fs.promises.stat(filePath);
       if (stat.mtimeMs > newestTime) {
@@ -457,7 +587,6 @@ async function findDownloadedFile(dir) {
         newest = filePath;
       }
     }
-
     return newest;
   } catch {
     return null;
@@ -465,8 +594,13 @@ async function findDownloadedFile(dir) {
 }
 
 module.exports = {
+  findCookiesFile,
+  getAuthArgs,
+  getCookieStatus,
   getInfo,
   getPlaylistInfo,
+  getStreamUrl,
   download,
   buildFormatArgs,
+  MOBILE_CLIENT_ARGS,
 };

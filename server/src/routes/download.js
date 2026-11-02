@@ -6,7 +6,7 @@
  */
 
 const { Router } = require('express');
-const { body, param, validationResult } = require('express-validator');
+const { body, param, query, validationResult } = require('express-validator');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs');
@@ -26,6 +26,129 @@ const router = Router();
  * @type {string}
  */
 const DOWNLOAD_DIR = path.resolve(process.env.DOWNLOAD_DIR || './downloads');
+
+/**
+ * GET /api/download/cookies-status
+ * Check whether cookies.txt is detected and configured.
+ */
+router.get('/cookies-status', (req, res) => {
+  const status = youtubeService.getCookieStatus();
+  res.json({
+    success: true,
+    cookiesConfigured: status.configured,
+    cookiePath: status.path ? path.basename(status.path) : null,
+  });
+});
+
+/**
+ * POST /api/download/stream-url
+ *
+ * Extract direct media stream URL(s) for client-side download.
+ * Enables the user's browser to download directly from YouTube's CDN,
+ * bypassing server IP bot-detection barriers.
+ *
+ * Request body:
+ *   {
+ *     "url": "https://www.youtube.com/watch?v=...",
+ *     "format": "video" | "audio",
+ *     "quality": "best" | "1080p" | "720p" | ...
+ *   }
+ */
+router.post(
+  '/stream-url',
+  [
+    body('url').isString().trim().notEmpty().withMessage('URL is required'),
+    body('format').optional().isString().trim(),
+    body('quality').optional().isString().trim(),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Validation failed',
+        details: errors.array(),
+      });
+    }
+
+    const { url, format = 'video', quality = 'best' } = req.body;
+
+    try {
+      const streamData = await youtubeService.getStreamUrl(url, { format, quality });
+      return res.json({
+        success: true,
+        data: streamData,
+      });
+    } catch (err) {
+      console.error('[Stream URL] Error:', err.message);
+      return res.status(500).json({
+        success: false,
+        error: err.message || 'Doğrudan akış URL\'si alınamadı',
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/download/direct
+ *
+ * Direct browser redirect endpoint. Fetches direct stream URL and redirects
+ * the client browser to the CDN file URL so downloading begins immediately
+ * from the client's network connection.
+ *
+ * Query params:
+ *   url: string (required)
+ *   format: 'video' | 'audio' (optional, default: 'video')
+ *   quality: 'best' | '1080p' | '720p' (optional, default: 'best')
+ */
+router.get(
+  '/direct',
+  [
+    query('url').isString().trim().notEmpty().withMessage('URL query parameter is required'),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Validation failed',
+        details: errors.array(),
+      });
+    }
+
+    const { url, format = 'video', quality = 'best' } = req.query;
+
+    try {
+      const streamData = await youtubeService.getStreamUrl(url, { format, quality });
+      return res.redirect(302, streamData.streamUrl);
+    } catch (err) {
+      console.error('[Direct Download] Error:', err.message);
+      return res.status(500).send(`
+        <!DOCTYPE html>
+        <html lang="tr">
+        <head>
+          <meta charset="utf-8">
+          <title>Doğrudan İndirme Hatası</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0b0f19; color: #f3f4f6; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+            .card { background: #131c2e; padding: 2rem; border-radius: 1rem; border: 1px solid #1e293b; max-width: 520px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); }
+            h2 { color: #f87171; margin-top: 0; }
+            p { color: #94a3b8; line-height: 1.5; }
+            a { color: #38bdf8; text-decoration: none; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <h2>İndirme Başlatılamadı</h2>
+            <p>${err.message}</p>
+            <p><a href="javascript:history.back()">&larr; Geri dön</a></p>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+  }
+);
 
 /**
  * POST /api/download/start
@@ -166,6 +289,7 @@ router.get('/progress/:id', [
     stage: download.stage,
     message: download.message,
     fileName: download.fileName,
+    fileUrl: download.fileUrl || null,
     error: download.error,
   };
   res.write(`data: ${JSON.stringify(initialEvent)}\n\n`);
@@ -238,6 +362,11 @@ router.get('/file/:id', [
       success: false,
       error: `Download is not ready. Current status: ${download.status}`,
     });
+  }
+
+  // If download was resolved as a direct stream (Cobalt API / external CDN), redirect client directly
+  if (download.fileUrl) {
+    return res.redirect(302, download.fileUrl);
   }
 
   const filePath = download.filePath;
@@ -432,6 +561,36 @@ async function processDownload(downloadId, url, platform, options) {
   let outputPath;
 
   if (['youtube', 'tiktok', 'instagram', 'twitter'].includes(platform)) {
+    // 1. Direct stream resolution (External APIs: Cobalt/Invidious/Piped -> Mobile yt-dlp)
+    // Directly hands the stream URL to the client browser without forcing server-side disk storage.
+    if (!options.normalize && !options.trimSilence) {
+      try {
+        downloadManager.updateProgress(downloadId, {
+          status: 'downloading',
+          stage: 'downloading',
+          progress: 50,
+          message: 'Doğrudan medya bağlantısı mobil istemci protokolüyle çözülüyor...',
+        });
+
+        const streamData = await youtubeService.getStreamUrl(url, options);
+        if (streamData?.streamUrl) {
+          downloadManager.updateProgress(downloadId, {
+            status: 'complete',
+            progress: 100,
+            stage: 'complete',
+            message: 'İndirme hazır!',
+            filePath: null,
+            fileUrl: streamData.streamUrl,
+            fileName: streamData.fileName,
+          });
+          console.log(`[Download] Direct stream resolved (${streamData.source}): ${downloadId} -> ${streamData.fileName}`);
+          return;
+        }
+      } catch (streamErr) {
+        console.warn(`[Download] Direct stream resolution failed, attempting server disk download:`, streamErr.message);
+      }
+    }
+
     outputPath = await youtubeService.download(url, options, progressCallback);
 
     // Apply post-processing if requested
